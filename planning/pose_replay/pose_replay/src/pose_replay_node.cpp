@@ -7,6 +7,10 @@
 #include "rclcpp/rclcpp.hpp"
 
 #include "autoware_adapi_v1_msgs/msg/route.hpp"
+
+// below import dev
+#include "autoware_adapi_v1_msgs/msg/route_state.hpp"
+
 #include "autoware_adapi_v1_msgs/srv/clear_route.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
@@ -164,6 +168,37 @@ public:
     }
     response->uuid = set_route_uuid;
   }
+
+  // void run_group(std::vector<std::string> & uuids, int & wait_ms)
+  // {
+  //   for (auto uuid : uuids) {
+  //     services_api(actions::LOAD, uuid);
+      // run function
+      // wait_ms, async call to check when auto run ends
+
+      // GO: service: autoware_adapi_v1_msgs::srv::ChangeOperationMode,
+      // /api/operation_mode/change_to_autonomous STOP: service:
+      // autoware_adapi_v1_msgs::srv::ChangeOperationMode, /api/operation_mode/change_to_stop
+
+      // autoware_adapi_v1_msgs::msg::OperationModeState, /api/operation_mode/state
+
+      // #include <autoware_adapi_v1_msgs/msg/operation_mode_state.hpp>
+      // #include <autoware_adapi_v1_msgs/srv/change_operation_mode.hpp>
+
+      // /api/routing/state, subscribe to  
+      // RouteState::ARRIVED,
+      // ros2 interface show autoware_adapi_v1_msgs/msg/RouteState
+      // uint16 UNKNOWN = 0 uint16 UNSET = 1 uint16 SET = 2 uint16 ARRIVED = 3 uint16 CHANGING = 4
+
+      // client_enable_autoware_control_ = raw_node_->create_client<ChangeOperationMode>(
+      //   "/api/operation_mode/enable_autoware_control");
+
+      // client_enable_direct_control_ = raw_node_->create_client<ChangeOperationMode>(
+      //   "/api/operation_mode/disable_autoware_control");
+  //   }
+  // }
+
+  // void run_route(std::string uuid) {}
 
   auto load_route(const std::string & uuid) -> int
   {
@@ -487,6 +522,9 @@ public:
   }
 
   rclcpp::Subscription<autoware_adapi_v1_msgs::msg::Route>::SharedPtr route_set_subscription_;
+
+  // below, dev
+  rclcpp::Subscription<autoware_adapi_v1_msgs::msg::RouteState>::SharedPtr route_state_subscription_;
 
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     initial_pose_publisher_;

@@ -5,3 +5,10 @@
 *.code-workspace
 
 /node_modules/
+
+# More
+
+*build/ 
+*install/
+*log/
+
