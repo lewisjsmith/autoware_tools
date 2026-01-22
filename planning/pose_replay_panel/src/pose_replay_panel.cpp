@@ -31,6 +31,7 @@ PoseReplayPanel::PoseReplayPanel(QWidget * parent) : Panel(parent)
   const auto main_title = new QLabel("Route history");
   const auto save_btn = new QPushButton("Save current route");
   const auto load_save_btn = new QPushButton("Load save file");
+  const auto play_route_btn = new QPushButton("Play route");
 
   QObject::connect(save_btn, &QPushButton::released, this, [this]() {
     node_abstract_->save_route();
@@ -38,10 +39,13 @@ PoseReplayPanel::PoseReplayPanel(QWidget * parent) : Panel(parent)
   });
   QObject::connect(
     load_save_btn, &QPushButton::released, this, [this]() { load_save_file_button_activated(); });
+      QObject::connect(
+    play_route_btn, &QPushButton::released, this, [this]() { node_abstract_->play_route(); });
 
   title_layout->addWidget(main_title);
   title_layout->addWidget(load_save_btn);
   title_layout->addWidget(save_btn);
+  title_layout->addWidget(play_route_btn);
 
   dynamic_layout_ = new QVBoxLayout(this);
   dynamic_layout_->setAlignment(Qt::AlignTop);

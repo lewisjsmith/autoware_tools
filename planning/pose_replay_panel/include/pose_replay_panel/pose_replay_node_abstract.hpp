@@ -8,10 +8,14 @@
 #include <rclcpp/parameter.hpp>
 
 #include "autoware_adapi_v1_msgs/msg/route.hpp"
+#include "autoware_adapi_v1_msgs/msg/route_state.hpp"
+#include "autoware_adapi_v1_msgs/srv/change_operation_mode.hpp"
 #include "autoware_adapi_v1_msgs/srv/clear_route.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "std_msgs/msg/string.hpp"
+#include <autoware_adapi_v1_msgs/msg/detail/route_state__struct.hpp>
+#include <autoware_adapi_v1_msgs/srv/detail/change_operation_mode__struct.hpp>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -70,12 +74,18 @@ public:
 
     route_set_subscription_ = node_->create_subscription<adapi_route>(
       "/api/routing/route", 10, [this](const adapi_route & msg) { route_set_callback(msg); });
+    route_state_subscription_ = node_->create_subscription<autoware_adapi_v1_msgs::msg::RouteState>(
+      "/api/routing/RouteState", 10,
+      [this](const autoware_adapi_v1_msgs::msg::RouteState & msg) { route_state_callback(msg); });
 
     initial_pose_publisher_ =
       node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/initialpose", 10);
     goal_pose_publisher_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
       "/planning/mission_planning/goal", 10);
     sync_notif_publisher_ = node_->create_publisher<std_msgs::msg::String>("update", 10);
+
+    start_route_client_ = node_->create_client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>(
+      "/api/operation_mode/change_to_autonomous");
 
     read_routes(get_save_path());
   }
@@ -253,6 +263,23 @@ public:
     read_routes(get_save_path());
   }
 
+  void play_route()
+  {
+    if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
+      auto request = std::make_shared<autoware_adapi_v1_msgs::srv::ChangeOperationMode::Request>();
+      auto future = start_route_client_->async_send_request(
+        request,
+        [this](
+          rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedFuture future) {
+          if (future.valid()) {
+            RCLCPP_INFO(node_->get_logger(), "Operation mode changed to 'auto'.");
+          } else {
+            RCLCPP_INFO(node_->get_logger(), "Operation mode change to 'auto' failed.");
+          }
+        });
+    }
+  }
+
   void clear_file(const std::string & filepath)
   {
     std::ofstream o;
@@ -314,6 +341,10 @@ public:
   }
 
   void route_set_callback(const adapi_route & msg) { current_route = msg; }
+  void route_state_callback(const autoware_adapi_v1_msgs::msg::RouteState & msg)
+  {
+    current_route_state = msg;
+  }
 
   void save_route()
   {
@@ -399,16 +430,21 @@ public:
   }
 
   rclcpp::Subscription<autoware_adapi_v1_msgs::msg::Route>::SharedPtr route_set_subscription_;
+  rclcpp::Subscription<autoware_adapi_v1_msgs::msg::RouteState>::SharedPtr
+    route_state_subscription_;
 
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     initial_pose_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sync_notif_publisher_;
 
+  rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedPtr start_route_client_;
+
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr save_file_cb_;
 
   uuid_route_map routes;
   adapi_route current_route;
+  autoware_adapi_v1_msgs::msg::RouteState current_route_state;
 
 private:
   rclcpp::Node::SharedPtr node_;
