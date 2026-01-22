@@ -75,7 +75,7 @@ public:
     route_set_subscription_ = node_->create_subscription<adapi_route>(
       "/api/routing/route", 10, [this](const adapi_route & msg) { route_set_callback(msg); });
     route_state_subscription_ = node_->create_subscription<autoware_adapi_v1_msgs::msg::RouteState>(
-      "/api/routing/RouteState", 10,
+      "/api/routing/state", 10,
       [this](const autoware_adapi_v1_msgs::msg::RouteState & msg) { route_state_callback(msg); });
 
     initial_pose_publisher_ =
@@ -263,6 +263,7 @@ public:
     read_routes(get_save_path());
   }
 
+  // TODO: Automatic detection of completed route -> change mode
   void play_route()
   {
     if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
