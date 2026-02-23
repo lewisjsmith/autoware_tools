@@ -16,7 +16,9 @@
 #define ROUTE_HISTORY__NODE_LOGIC_HPP_
 
 #include "rclcpp/rclcpp.hpp"
+#include "types.hpp"
 #include "yaml_storage.hpp"
+#include "yaml_unmarshal.hpp"
 
 #include <rcl_interfaces/msg/detail/set_parameters_result__struct.hpp>
 #include <rclcpp/logging.hpp>
@@ -48,22 +50,6 @@
 
 namespace autoware::route_history
 {
-
-using adapi_route = autoware_adapi_v1_msgs::msg::Route;
-
-struct NamedRoute
-{
-  std::string name;
-  adapi_route route;
-};
-
-struct UuidName
-{
-  std::string uuid;
-  std::string name;
-};
-
-using uuid_route_map = std::unordered_map<std::string, NamedRoute>;
 
 class NodeLogic
 {
@@ -182,43 +168,34 @@ public:
       RCLCPP_INFO(node_->get_logger(), "[set_route] No uuid given.");
       return;
     }
+    geometry_msgs::msg::PoseWithCovarianceStamped initial_msg;
 
-    try {
-      geometry_msgs::msg::PoseWithCovarianceStamped initial_msg;
+    initial_msg.header.frame_id = routes.at(uuid).route.header.frame_id;
 
-      initial_msg.header.frame_id = routes.at(uuid).route.header.frame_id;
+    initial_msg.pose.pose.position.x = routes.at(uuid).route.data[0].start.position.x;
+    initial_msg.pose.pose.position.y = routes.at(uuid).route.data[0].start.position.y;
+    initial_msg.pose.pose.position.z = routes.at(uuid).route.data[0].start.position.z;
 
-      initial_msg.pose.pose.position.x = routes.at(uuid).route.data[0].start.position.x;
-      initial_msg.pose.pose.position.y = routes.at(uuid).route.data[0].start.position.y;
-      initial_msg.pose.pose.position.z = routes.at(uuid).route.data[0].start.position.z;
+    initial_msg.pose.pose.orientation.x = routes.at(uuid).route.data[0].start.orientation.x;
+    initial_msg.pose.pose.orientation.y = routes.at(uuid).route.data[0].start.orientation.y;
+    initial_msg.pose.pose.orientation.z = routes.at(uuid).route.data[0].start.orientation.z;
+    initial_msg.pose.pose.orientation.w = routes.at(uuid).route.data[0].start.orientation.w;
 
-      initial_msg.pose.pose.orientation.x = routes.at(uuid).route.data[0].start.orientation.x;
-      initial_msg.pose.pose.orientation.y = routes.at(uuid).route.data[0].start.orientation.y;
-      initial_msg.pose.pose.orientation.z = routes.at(uuid).route.data[0].start.orientation.z;
-      initial_msg.pose.pose.orientation.w = routes.at(uuid).route.data[0].start.orientation.w;
+    geometry_msgs::msg::PoseStamped goal_msg;
 
-      geometry_msgs::msg::PoseStamped goal_msg;
+    goal_msg.header.frame_id = routes.at(uuid).route.header.frame_id;
 
-      goal_msg.header.frame_id = routes.at(uuid).route.header.frame_id;
+    goal_msg.pose.position.x = routes.at(uuid).route.data[0].goal.position.x;
+    goal_msg.pose.position.y = routes.at(uuid).route.data[0].goal.position.y;
+    goal_msg.pose.position.z = routes.at(uuid).route.data[0].goal.position.z;
 
-      goal_msg.pose.position.x = routes.at(uuid).route.data[0].goal.position.x;
-      goal_msg.pose.position.y = routes.at(uuid).route.data[0].goal.position.y;
-      goal_msg.pose.position.z = routes.at(uuid).route.data[0].goal.position.z;
+    goal_msg.pose.orientation.x = routes.at(uuid).route.data[0].goal.orientation.x;
+    goal_msg.pose.orientation.y = routes.at(uuid).route.data[0].goal.orientation.y;
+    goal_msg.pose.orientation.z = routes.at(uuid).route.data[0].goal.orientation.z;
+    goal_msg.pose.orientation.w = routes.at(uuid).route.data[0].goal.orientation.w;
 
-      goal_msg.pose.orientation.x = routes.at(uuid).route.data[0].goal.orientation.x;
-      goal_msg.pose.orientation.y = routes.at(uuid).route.data[0].goal.orientation.y;
-      goal_msg.pose.orientation.z = routes.at(uuid).route.data[0].goal.orientation.z;
-      goal_msg.pose.orientation.w = routes.at(uuid).route.data[0].goal.orientation.w;
-
-      initial_pose_publisher_->publish(initial_msg);
-      goal_pose_publisher_->publish(goal_msg);
-    } catch (const YAML::BadFile & e) {
-      RCLCPP_INFO(
-        node_->get_logger(), "[set_route] Save file not found at path: %s.",
-        get_save_file_path_param().c_str());
-    } catch (const YAML::BadConversion & e) {
-      RCLCPP_INFO(node_->get_logger(), "[set_route] Bad conversion, yaml to pose: %s", e.what());
-    }
+    initial_pose_publisher_->publish(initial_msg);
+    goal_pose_publisher_->publish(goal_msg);
   }
 
   void delete_route(const std::string & uuid)
@@ -359,76 +336,6 @@ public:
       node_->get_logger(), "[route_set_callback] Route written to %s.",
       get_save_file_path_param().c_str());
     read_routes();
-  }
-
-  auto yaml_to_map(YAML::Node root) -> uuid_route_map
-  {
-    autoware_adapi_v1_msgs::msg::Route msg;
-
-    // Parse header
-    auto header_node = root["header"];
-    msg.header.stamp.sec = header_node["stamp"]["sec"].as<int32_t>();
-    msg.header.stamp.nanosec = header_node["stamp"]["nanosec"].as<uint32_t>();
-    msg.header.frame_id = header_node["frame_id"].as<std::string>();
-
-    // Parse data (array, max 1)
-    auto data_node = root["data"];
-    if (data_node && data_node.IsSequence() && !data_node.IsNull()) {
-      for (const auto & route_node : data_node) {
-        autoware_adapi_v1_msgs::msg::RouteData route_data;
-
-        // Start pose
-        route_data.start.position.x = route_node["start"]["position"]["x"].as<double>();
-        route_data.start.position.y = route_node["start"]["position"]["y"].as<double>();
-        route_data.start.position.z = route_node["start"]["position"]["z"].as<double>();
-
-        route_data.start.orientation.x = route_node["start"]["orientation"]["x"].as<double>();
-        route_data.start.orientation.y = route_node["start"]["orientation"]["y"].as<double>();
-        route_data.start.orientation.z = route_node["start"]["orientation"]["z"].as<double>();
-        route_data.start.orientation.w = route_node["start"]["orientation"]["w"].as<double>();
-
-        // Goal pose
-        route_data.goal.position.x = route_node["goal"]["position"]["x"].as<double>();
-        route_data.goal.position.y = route_node["goal"]["position"]["y"].as<double>();
-        route_data.goal.position.z = route_node["goal"]["position"]["z"].as<double>();
-
-        route_data.goal.orientation.x = route_node["goal"]["orientation"]["x"].as<double>();
-        route_data.goal.orientation.y = route_node["goal"]["orientation"]["y"].as<double>();
-        route_data.goal.orientation.z = route_node["goal"]["orientation"]["z"].as<double>();
-        route_data.goal.orientation.w = route_node["goal"]["orientation"]["w"].as<double>();
-
-        // Segments
-        auto segments_node = route_node["segments"];
-        if (segments_node && segments_node.IsSequence()) {
-          for (const auto & seg_node : segments_node) {
-            autoware_adapi_v1_msgs::msg::RouteSegment seg;
-
-            // Preferred
-            seg.preferred.id = seg_node["preferred"]["id"].as<int64_t>();
-            seg.preferred.type = seg_node["preferred"]["type"].as<std::string>();
-
-            // Alternatives
-            auto alt_node = seg_node["alternatives"];
-            if (alt_node && alt_node.IsSequence()) {
-              for (const auto & alt : alt_node) {
-                autoware_adapi_v1_msgs::msg::RoutePrimitive alt_prim;
-                alt_prim.id = alt["id"].as<int64_t>();
-                alt_prim.type = alt["type"].as<std::string>();
-                seg.alternatives.push_back(alt_prim);
-              }
-            }
-
-            route_data.segments.push_back(seg);
-          }
-        }
-
-        msg.data.push_back(route_data);
-      }
-    }
-
-    uuid_route_map map_obj = {
-      {root["uuid"].as<std::string>(), {root["name"].as<std::string>(), msg}}};
-    return map_obj;
   }
 
   rclcpp::Subscription<autoware_adapi_v1_msgs::msg::Route>::SharedPtr route_set_subscription_;
