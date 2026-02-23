@@ -16,7 +16,7 @@
 #define ROUTE_HISTORY__NODE_LOGIC_HPP_
 
 #include "rclcpp/rclcpp.hpp"
-#include "yaml_save.hpp"
+#include "yaml_storage.hpp"
 
 #include <rcl_interfaces/msg/detail/set_parameters_result__struct.hpp>
 #include <rclcpp/logging.hpp>
@@ -40,6 +40,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -92,8 +93,8 @@ public:
       "/planning/mission_planning/goal", 10);
     sync_notif_publisher_ = node_->create_publisher<std_msgs::msg::String>("update", 10);
 
-    _yaml_manager = std::make_unique<YamlManager>();
-    _yaml_manager->set_path(get_save_path());
+    yaml_storage_ = std::make_unique<YamlStorage>();
+    yaml_storage_->set_path(get_save_file_path_param());
     read_routes();
   }
 
@@ -115,7 +116,7 @@ public:
     result.successful = true;
     for (const auto & p : parameters) {
       if (p.get_name() == "save_file_path") {
-        std::string path = expand_home_path(p.get_value<std::string>());
+        std::string path = p.get_value<std::string>();
 
         if (path.empty()) {
           result.successful = false;
@@ -123,45 +124,28 @@ public:
           return result;
         }
 
-        if (!_yaml_manager) {
+        if (!yaml_storage_) {
           result.successful = false;
           result.reason = "YAML manager not initialized";
           return result;
         }
 
-        try {
-          _yaml_manager->set_path(path);
-          this->read_routes();
-        } catch (const std::exception & e) {
-          result.successful = false;
-          result.reason = e.what();
-          return result;
-        }
+        yaml_storage_->set_path(path);
+        this->read_routes();
       }
     }
     return result;
   }
 
   // Callback updates the yaml manager
-  auto get_save_path() -> std::string
+  auto get_save_file_path_param() -> std::string
   {
-    return expand_home_path(node_->get_parameter("save_file_path").as_string());
+    return node_->get_parameter("save_file_path").as_string();
   }
 
-  void set_save_path(const std::string & new_path)
+  void set_save_file_path_param(const std::string & new_path)
   {
     node_->set_parameters({rclcpp::Parameter("save_file_path", new_path)});
-  }
-
-  auto expand_home_path(const std::string & path) -> std::string
-  {
-    if (!path.empty() && path[0] == '~') {
-      const char * home = getenv("HOME");
-      if (home) {
-        return std::string(home) + path.substr(1);
-      }
-    }
-    return path;
   }
 
   auto get_routes(const std::vector<std::string> & uuids) -> std::vector<UuidName>
@@ -231,7 +215,7 @@ public:
     } catch (const YAML::BadFile & e) {
       RCLCPP_INFO(
         node_->get_logger(), "[set_route] Save file not found at path: %s.",
-        get_save_path().c_str());
+        get_save_file_path_param().c_str());
     } catch (const YAML::BadConversion & e) {
       RCLCPP_INFO(node_->get_logger(), "[set_route] Bad conversion, yaml to pose: %s", e.what());
     }
@@ -244,7 +228,11 @@ public:
       return;
     }
 
-    std::vector<YAML::Node> docs = _yaml_manager->read();
+    std::vector<YAML::Node> docs;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      docs = yaml_storage_->read();
+    }
 
     // Delete from function scope
     // clang-format off
@@ -263,8 +251,11 @@ public:
       }
     }
 
-    _yaml_manager->clear();
-    _yaml_manager->write(docs, true);
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      yaml_storage_->clear();
+      yaml_storage_->write(docs, true);
+    }
 
     read_routes();
   }
@@ -277,7 +268,11 @@ public:
     }
 
     // Read and save to function scope
-    std::vector<YAML::Node> docs = _yaml_manager->read();
+    std::vector<YAML::Node> docs;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      docs = yaml_storage_->read();
+    }
 
     // Delete from function scope
     // clang-format off
@@ -299,8 +294,11 @@ public:
     }
 
     // Wipe file and re-write to save
-    _yaml_manager->clear();
-    _yaml_manager->write(docs, true);
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      yaml_storage_->clear();
+      yaml_storage_->write(docs, true);
+    }
 
     // Update local node to sync
     read_routes();
@@ -310,19 +308,13 @@ public:
   void clear_routes() {routes = {};}
   // clang-format on
 
-  auto read_yaml_to_node_vector(const std::string & filepath) -> std::vector<YAML::Node>
-  {
-    std::ifstream yaml_file(filepath);
-    std::vector<YAML::Node> docs = YAML::LoadAll(yaml_file);
-    if (docs.empty()) {
-      return {};
-    }
-    return docs;
-  }
-
   void read_routes()
   {
-    std::vector<YAML::Node> docs = _yaml_manager->read();
+    std::vector<YAML::Node> docs;
+    {
+      std::lock_guard<std::mutex> lock(mtx_);
+      docs = yaml_storage_->read();
+    }
     clear_routes();
     for (auto & doc : docs) {
       append_route(doc);
@@ -361,10 +353,11 @@ public:
 
     std::string yaml_str = autoware_adapi_v1_msgs::msg::to_yaml(current_route);
     auto uuid_yaml_str = prepend_uuid_name(yaml_str);
-    _yaml_manager->write(uuid_yaml_str, true);
+    yaml_storage_->write(uuid_yaml_str, true);
 
     RCLCPP_INFO(
-      node_->get_logger(), "[route_set_callback] Route written to %s.", get_save_path().c_str());
+      node_->get_logger(), "[route_set_callback] Route written to %s.",
+      get_save_file_path_param().c_str());
     read_routes();
   }
 
@@ -452,7 +445,8 @@ public:
 
 private:
   rclcpp::Node::SharedPtr node_;
-  std::unique_ptr<YamlManager> _yaml_manager = nullptr;
+  std::unique_ptr<YamlStorage> yaml_storage_ = nullptr;
+  std::mutex mtx_;
 };
 
 }  // namespace autoware::route_history
