@@ -35,6 +35,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
+#include <yaml-cpp/node/node.h>
 #include <yaml-cpp/yaml.h>
 
 #include <cstdio>
@@ -68,9 +69,18 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
     node_->create_publisher<geometry_msgs::msg::PoseStamped>("/planning/mission_planning/goal", 10);
   sync_notif_publisher_ = node_->create_publisher<std_msgs::msg::String>("update", 10);
 
-  yaml_storage_ = std::make_unique<YamlStorage>();
-  yaml_storage_->set_path(get_save_file_path_param());
+  yaml_storage_routes_ = std::make_unique<YamlStorage>();
+  yaml_storage_routes_->set_path(get_save_file_path_param());
   read_routes();
+
+  yaml_storage_groups_ = std::make_unique<YamlStorage>();
+  yaml_storage_groups_->set_path("~/.ros/route_history_groups.yaml");
+
+  // TESTING
+  // create_group("Test group", std::vector<std::string>{
+  //   "uuid 1", "uuid 2", "uuid 3"
+  // });
+  // add_to_group("11dcba2a-37e3-447d-aa62-24b846c27b45", "uuid added!");
 }
 
 NodeLogic::~NodeLogic()
@@ -90,13 +100,13 @@ auto NodeLogic::get_save_file_path_param() -> std::string
 
 void NodeLogic::set_save_file_path(const std::string & new_path)
 {
-  if (!yaml_storage_) {
+  if (!yaml_storage_routes_) {
     RCLCPP_ERROR(node_->get_logger(), "[set_save_file_path] no YamlStorage object.");
     return;
   }
 
-  yaml_storage_->set_path(new_path);
-  node_->set_parameters({rclcpp::Parameter("save_file_path", yaml_storage_->get_path())});
+  yaml_storage_routes_->set_path(new_path);
+  node_->set_parameters({rclcpp::Parameter("save_file_path", yaml_storage_routes_->get_path())});
   read_routes();
 }
 
@@ -174,7 +184,7 @@ void NodeLogic::delete_route(const std::string & uuid)
   std::vector<YAML::Node> docs;
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    docs = yaml_storage_->read();
+    docs = yaml_storage_routes_->read();
   }
 
   // Delete from function scope
@@ -195,8 +205,8 @@ void NodeLogic::delete_route(const std::string & uuid)
 
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    yaml_storage_->clear();
-    yaml_storage_->write(docs, true);
+    yaml_storage_routes_->clear();
+    yaml_storage_routes_->write(docs, true);
   }
 
   read_routes();
@@ -213,7 +223,7 @@ void NodeLogic::set_name(const std::string & uuid, const std::string & new_name)
   std::vector<YAML::Node> docs;
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    docs = yaml_storage_->read();
+    docs = yaml_storage_routes_->read();
   }
 
   // Delete from function scope
@@ -238,8 +248,8 @@ void NodeLogic::set_name(const std::string & uuid, const std::string & new_name)
   // Wipe file and re-write to save
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    yaml_storage_->clear();
-    yaml_storage_->write(docs, true);
+    yaml_storage_routes_->clear();
+    yaml_storage_routes_->write(docs, true);
   }
 
   // Update local node to sync
@@ -255,7 +265,7 @@ void NodeLogic::read_routes()
   std::vector<YAML::Node> docs;
   {
     std::lock_guard<std::mutex> lock(mtx_);
-    docs = yaml_storage_->read();
+    docs = yaml_storage_routes_->read();
   }
   clear_routes();
   for (auto & doc : docs) {
@@ -295,12 +305,71 @@ void NodeLogic::save_route()
 
   std::string yaml_str = autoware_adapi_v1_msgs::msg::to_yaml(current_route);
   auto uuid_yaml_str = prepend_uuid_name(yaml_str);
-  yaml_storage_->write(uuid_yaml_str, true);
+  yaml_storage_routes_->write(uuid_yaml_str, true);
 
   RCLCPP_INFO(
     node_->get_logger(), "[route_set_callback] Route written to %s.",
     get_save_file_path_param().c_str());
   read_routes();
 }
+
+void NodeLogic::create_group(
+  const std::string & group_name, const std::vector<std::string> & route_uuids)
+{
+  if (!yaml_storage_groups_) {
+    return;
+  }
+
+  // DEBUG
+  // std::string uuid_str = "11dcba2a-37e3-447d-aa62-24b846c27b45";
+  boost::uuids::random_generator gen;
+  boost::uuids::uuid uuid_str = gen();
+
+  std::ostringstream oss;
+
+  oss << "name: \"" << group_name << "\"\n";
+  oss << "group_uuid: \"" << uuid_str << "\"\n";
+
+  if (!route_uuids.empty()) {
+    oss << "route_uuids:\n";
+    for (auto & uuid : route_uuids) {
+      oss << "  - \"" << uuid << "\"\n";
+    }
+  } else {
+    oss << "route_uuids: []\n";
+  }
+
+  std::string new_group_str = oss.str();
+  yaml_storage_groups_->write(new_group_str);
+}
+
+void NodeLogic::add_to_group(
+  const std::string & group_uuid, const std::vector<std::string> & route_uuids)
+{
+  if (group_uuid.empty() || route_uuids.empty()) {
+    return;
+  }
+
+  std::vector<YAML::Node> docs = yaml_storage_groups_->read();
+
+  for (auto p = docs.begin(); p != docs.end();) {
+    if (!*p || !(*p)["group_uuid"]) {
+      ++p;
+      continue;
+    }
+    if ((*p)["group_uuid"].as<std::string>() == group_uuid) {
+      if (!(*p)["route_uuids"] || !(*p)["route_uuids"].IsSequence()) return;
+      for (auto & route_uuid : route_uuids) {
+        (*p)["route_uuids"].push_back(route_uuid);
+      }
+      p = docs.end();
+    } else {
+      ++p;
+    }
+  }
+
+  yaml_storage_groups_->clear();
+  yaml_storage_groups_->write(docs, true);
+};
 
 }  // namespace autoware::route_history
