@@ -80,9 +80,11 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
   // create_group("Test group", std::vector<std::string>{
   //   "uuid 1", "uuid 2", "uuid 3"
   // });
-  // add_to_group("11dcba2a-37e3-447d-aa62-24b846c27b45", "uuid added!");
-  // remove_from_group("11dcba2a-37e3-447d-aa62-24b846c27b45", {"uuid 2"});
-  set_group_name("11dcba2a-37e3-447d-aa62-24b846c27b45", "I am a changed name!");
+  // add_routes_to_group("11dcba2a-37e3-447d-aa62-24b846c27b45", "uuid added!");
+  // remove_routes_from_group("c05d20d4-b3a2-4e1a-939a-e00ddc77763c", {"uuid 2"}, true);
+  // remove_routes_from_group("11dcba2a-37e3-447d-aa62-24b846c27b45", {"uuid 2"}, false);
+  // set_group_name("11dcba2a-37e3-447d-aa62-24b846c27b45", "I am a changed name!");
+  // delete_groups({"c25d20d4-b3a2-4e1a-939a-e00ddc77763c"});
 }
 
 NodeLogic::~NodeLogic()
@@ -212,6 +214,9 @@ void NodeLogic::delete_route(const std::string & uuid)
   }
 
   read_routes();
+
+  // Group clean-up
+  remove_routes_from_group("", {uuid}, true);
 }
 
 void NodeLogic::set_name(const std::string & uuid, const std::string & new_name)
@@ -295,9 +300,10 @@ auto NodeLogic::prepend_uuid_name(const std::string & yaml_str) -> std::string
   return new_str;
 }
 
-// clang-format off
-void NodeLogic::route_set_callback(const adapi_route & msg) {current_route = msg;}
-// clang-format on
+void NodeLogic::route_set_callback(const adapi_route & msg)
+{
+  current_route = msg;
+}
 
 void NodeLogic::save_route()
 {
@@ -345,7 +351,7 @@ void NodeLogic::create_group(
   yaml_storage_groups_->write(new_group_str);
 }
 
-void NodeLogic::add_to_group(
+void NodeLogic::add_routes_to_group(
   const std::string & group_uuid, const std::vector<std::string> & route_uuids)
 {
   if (group_uuid.empty() || route_uuids.empty()) {
@@ -374,21 +380,21 @@ void NodeLogic::add_to_group(
   yaml_storage_groups_->write(docs, true);
 };
 
-void NodeLogic::remove_from_group(
-  const std::string & group_uuid, const std::vector<std::string> & route_uuids)
+void NodeLogic::remove_routes_from_group(
+  const std::string & group_uuid, const std::vector<std::string> & route_uuids, bool all_groups)
 {
-  if (group_uuid.empty() || route_uuids.empty()) {
+  if ((group_uuid.empty() && !all_groups) || route_uuids.empty()) {
     return;
   }
 
   std::vector<YAML::Node> docs = yaml_storage_groups_->read();
 
-  for (auto p = docs.begin(); p != docs.end();) {
+  for (auto p = docs.begin(); p != docs.end(); ++p) {
     if (!*p || !(*p)["group_uuid"]) {
       ++p;
       continue;
     }
-    if ((*p)["group_uuid"].as<std::string>() == group_uuid) {
+    if (((*p)["group_uuid"].as<std::string>() == group_uuid) || all_groups) {
       if (!(*p)["route_uuids"] || !(*p)["route_uuids"].IsSequence()) return;
 
       std::unordered_map<std::string, bool> ignore_uuids;
@@ -404,9 +410,7 @@ void NodeLogic::remove_from_group(
       }
 
       (*p)["route_uuids"] = new_route_uuids_node;
-      p = docs.end();
-    } else {
-      ++p;
+      if (!all_groups) break;
     }
   }
 
@@ -422,17 +426,9 @@ void NodeLogic::set_group_name(const std::string & group_uuid, const std::string
     return;
   }
 
-  // Read and save to function scope
-  std::vector<YAML::Node> docs;
-  {
-    std::lock_guard<std::mutex> lock(mtx_);
-    docs = yaml_storage_groups_->read();
-  }
+  std::vector<YAML::Node> docs = yaml_storage_groups_->read();
 
-  // Delete from function scope
-  // clang-format off
-    for (auto p = docs.begin(); p != docs.end(); ) {
-    // clang-format on
+  for (auto p = docs.begin(); p != docs.end();) {
     if (!*p || !(*p)["group_uuid"]) {
       ++p;
       continue;
@@ -450,6 +446,39 @@ void NodeLogic::set_group_name(const std::string & group_uuid, const std::string
 
   yaml_storage_groups_->clear();
   yaml_storage_groups_->write(docs, true);
+}
+
+void NodeLogic::set_group_file_path(const std::string & new_path)
+{
+  if (!yaml_storage_groups_) {
+    RCLCPP_ERROR(node_->get_logger(), "[set_group_file_path] no YamlStorage object.");
+    return;
+  }
+
+  yaml_storage_groups_->set_path(new_path);
+}
+
+void NodeLogic::delete_groups(const std::vector<std::string> & group_uuids)
+{
+  if (group_uuids.empty()) return;
+
+  std::vector<YAML::Node> docs = yaml_storage_groups_->read();
+  if (docs.empty()) return;
+
+  std::unordered_map<std::string, bool> ignore_uuids;
+  for (auto & uuid : group_uuids) {
+    ignore_uuids[uuid] = true;
+  }
+
+  std::vector<YAML::Node> new_docs;
+  for (auto p = docs.begin(); p != docs.end(); p++) {
+    if (!ignore_uuids.count((*p)["group_uuid"].as<std::string>())) {
+      new_docs.push_back(*p);
+    }
+  }
+
+  yaml_storage_groups_->clear();
+  yaml_storage_groups_->write(new_docs, true);
 }
 
 }  // namespace autoware::route_history
