@@ -71,7 +71,8 @@ public:
     const std::string & group_name = "New group",
     const std::vector<std::string> & route_uuids = {});
   void add_to_group(const std::string & group_uuid, const std::vector<std::string> & route_uuids);
-  void remove_from_group(const std::string & route_uuid, const std::string & group_uuid);
+  void remove_from_group(
+    const std::string & group_uuid, const std::vector<std::string> & route_uuids);
   void set_group_name(const std::string & group_uuid, const std::string & group_name);
   void set_group_file_path(const std::string & group_file_path);
 

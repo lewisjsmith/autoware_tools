@@ -81,6 +81,7 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
   //   "uuid 1", "uuid 2", "uuid 3"
   // });
   // add_to_group("11dcba2a-37e3-447d-aa62-24b846c27b45", "uuid added!");
+  // remove_from_group("11dcba2a-37e3-447d-aa62-24b846c27b45", {"uuid 2"});
 }
 
 NodeLogic::~NodeLogic()
@@ -371,5 +372,45 @@ void NodeLogic::add_to_group(
   yaml_storage_groups_->clear();
   yaml_storage_groups_->write(docs, true);
 };
+
+void NodeLogic::remove_from_group(
+  const std::string & group_uuid, const std::vector<std::string> & route_uuids)
+{
+  if (group_uuid.empty() || route_uuids.empty()) {
+    return;
+  }
+
+  std::vector<YAML::Node> docs = yaml_storage_groups_->read();
+
+  for (auto p = docs.begin(); p != docs.end();) {
+    if (!*p || !(*p)["group_uuid"]) {
+      ++p;
+      continue;
+    }
+    if ((*p)["group_uuid"].as<std::string>() == group_uuid) {
+      if (!(*p)["route_uuids"] || !(*p)["route_uuids"].IsSequence()) return;
+
+      std::unordered_map<std::string, bool> ignore_uuids;
+      for (auto & route_uuid : route_uuids) {
+        ignore_uuids[route_uuid] = true;
+      }
+
+      YAML::Node new_route_uuids_node(YAML::NodeType::Sequence);
+      for (const auto & n : (*p)["route_uuids"]) {
+        if (!ignore_uuids.count(n.as<std::string>())) {
+          new_route_uuids_node.push_back(n);
+        }
+      }
+
+      (*p)["route_uuids"] = new_route_uuids_node;
+      p = docs.end();
+    } else {
+      ++p;
+    }
+  }
+
+  yaml_storage_groups_->clear();
+  yaml_storage_groups_->write(docs, true);
+}
 
 }  // namespace autoware::route_history
