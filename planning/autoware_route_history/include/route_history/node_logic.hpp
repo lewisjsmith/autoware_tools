@@ -75,6 +75,7 @@ public:
     const std::string & group_uuid, const std::vector<std::string> & route_uuids);
   void set_group_name(const std::string & group_uuid, const std::string & group_name);
   void set_group_file_path(const std::string & group_file_path);
+  // TODO(lewisjsmith): ensure route deletion is reflected in groups
 
   rclcpp::Subscription<autoware_adapi_v1_msgs::msg::Route>::SharedPtr route_set_subscription_;
 
