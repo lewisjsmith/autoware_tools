@@ -20,6 +20,7 @@
 #include "route_history/yaml_unmarshal.hpp"
 
 #include <rcl_interfaces/msg/detail/set_parameters_result__struct.hpp>
+#include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
 #include <rclcpp/node.hpp>
 #include <rclcpp/parameter.hpp>
@@ -56,10 +57,6 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
     node_->declare_parameter("save_file_path", "~/.ros/route_history.yaml");
   }
 
-  save_file_cb_ = node_->add_on_set_parameters_callback(
-    [this](const std::vector<rclcpp::Parameter> & parameters)
-      -> rcl_interfaces::msg::SetParametersResult { return save_file_path_callback(parameters); });
-
   // clang-format off
     route_set_subscription_ = node_->create_subscription<adapi_route>(
       "/api/routing/route", 10, [this](const adapi_route & msg) {route_set_callback(msg);});
@@ -78,52 +75,29 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
 
 NodeLogic::~NodeLogic()
 {
-  save_file_cb_.reset();
   route_set_subscription_.reset();
   initial_pose_publisher_.reset();
   goal_pose_publisher_.reset();
   sync_notif_publisher_.reset();
 
-  RCLCPP_INFO(node_->get_logger(), "NodeLogic clean up successful.");
+  RCLCPP_INFO(node_->get_logger(), "[~NodeLogic()] NodeLogic clean up successful.");
 }
 
-rcl_interfaces::msg::SetParametersResult NodeLogic::save_file_path_callback(
-  const std::vector<rclcpp::Parameter> & parameters)
-{
-  rcl_interfaces::msg::SetParametersResult result;
-  result.successful = true;
-  for (const auto & p : parameters) {
-    if (p.get_name() == "save_file_path") {
-      std::string path = p.get_value<std::string>();
-
-      if (path.empty()) {
-        result.successful = false;
-        result.reason = "Expanded path is empty";
-        return result;
-      }
-
-      if (!yaml_storage_) {
-        result.successful = false;
-        result.reason = "YAML manager not initialized";
-        return result;
-      }
-
-      yaml_storage_->set_path(path);
-      this->read_routes();
-    }
-  }
-  return result;
-}
-
-// Callback updates the yaml manager
 auto NodeLogic::get_save_file_path_param() -> std::string
 {
   return node_->get_parameter("save_file_path").as_string();
 }
 
-void NodeLogic::set_save_file_path_param(const std::string & new_path)
+void NodeLogic::set_save_file_path(const std::string & new_path)
 {
-  node_->set_parameters({rclcpp::Parameter("save_file_path", new_path)});
+  if (!yaml_storage_) {
+    RCLCPP_ERROR(node_->get_logger(), "[set_save_file_path] no YamlStorage object.");
+    return;
+  }
+
+  yaml_storage_->set_path(new_path);
+  node_->set_parameters({rclcpp::Parameter("save_file_path", yaml_storage_->get_path())});
+  read_routes();
 }
 
 auto NodeLogic::get_routes(const std::vector<std::string> & uuids) -> std::vector<UuidName>

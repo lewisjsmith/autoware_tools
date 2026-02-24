@@ -43,13 +43,9 @@ public:
   explicit NodeLogic(const rclcpp::Node::SharedPtr &);
   ~NodeLogic();
 
-  rcl_interfaces::msg::SetParametersResult save_file_path_callback(
-    const std::vector<rclcpp::Parameter> &);
-
-  // Callback updates the yaml manager
   auto get_save_file_path_param() -> std::string;
 
-  void set_save_file_path_param(const std::string &);
+  void set_save_file_path(const std::string &);
 
   auto get_routes(const std::vector<std::string> &) -> std::vector<UuidName>;
 
@@ -77,8 +73,6 @@ public:
     initial_pose_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_publisher_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sync_notif_publisher_;
-
-  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr save_file_cb_;
 
   uuid_route_map routes;
   adapi_route current_route;

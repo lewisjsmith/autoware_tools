@@ -14,9 +14,14 @@
 
 #include "route_history/yaml_storage.hpp"
 
+#include "rclcpp/rclcpp.hpp"
+
+#include <rclcpp/logging.hpp>
+
 #include <yaml-cpp/node/parse.h>
 #include <yaml-cpp/yaml.h>
 
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -26,18 +31,24 @@ namespace autoware::route_history
 
 void YamlStorage::set_path(const std::string & path)
 {
-  _path = expand_home_path(path);
+  std::string expanded_path = expand_home_path(path);
+  if (is_valid_file_path(expanded_path))
+    path_ = expanded_path;
+  else
+    RCLCPP_ERROR(rclcpp::get_logger("yaml_storage"), "[set_path]: invalid file path.");
 }
+
 std::string YamlStorage::get_path()
 {
-  return _path;
+  return path_;
 }
 
 std::vector<YAML::Node> YamlStorage::read()
 {
   try {
-    return YAML::LoadAllFromFile(_path);
-  } catch (const YAML::BadFile &) {
+    return YAML::LoadAllFromFile(path_);
+  } catch (const YAML::BadFile & err) {
+    RCLCPP_ERROR(rclcpp::get_logger("yaml_storage"), "[read]: %s.", err.what());
     return {};
   }
 }
@@ -45,7 +56,7 @@ std::vector<YAML::Node> YamlStorage::read()
 void YamlStorage::clear()
 {
   std::ofstream o;
-  o.open(_path, std::ios::trunc);
+  o.open(path_, std::ios::trunc);
 }
 
 auto YamlStorage::expand_home_path(const std::string & path) -> std::string
@@ -57,6 +68,27 @@ auto YamlStorage::expand_home_path(const std::string & path) -> std::string
     }
   }
   return path;
+}
+
+bool YamlStorage::is_valid_file_path(const std::string & path_str)
+{
+  std::filesystem::path path(path_str);
+  std::filesystem::path parent = path.parent_path();
+
+  if (!std::filesystem::exists(parent) || !std::filesystem::is_directory(parent)) {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("yaml_storage"),
+      "[is_valid_file_path]: directory in save file path is not valid.");
+    return false;
+  }
+
+  if (path_str.empty()) {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("yaml_storage"), "[is_valid_file_path]: save file path is empty.");
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace autoware::route_history

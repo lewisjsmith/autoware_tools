@@ -132,7 +132,7 @@ void RouteHistoryPanel::load_save_file_button_activated()
   QString new_path = QInputDialog::getText(
     this, tr("Load save"), tr(edit_title.c_str()), QLineEdit::Normal, "", &ok);
   if (ok && !new_path.isEmpty()) {
-    node_abstract_->set_save_file_path_param(new_path.toStdString());
+    node_abstract_->set_save_file_path(new_path.toStdString());
     sync_read();
   }
 }

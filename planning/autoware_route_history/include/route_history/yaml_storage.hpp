@@ -31,6 +31,9 @@ public:
   YamlStorage() {}
   ~YamlStorage() {}
 
+  static auto expand_home_path(const std::string &) -> std::string;
+  static bool is_valid_file_path(const std::string &);
+
   void set_path(const std::string &);
   std::string get_path();
 
@@ -43,13 +46,13 @@ public:
   {
     std::ofstream o;
     if (append) {
-      o.open(_path, std::ios::app);
+      o.open(path_, std::ios::app);
     } else {
-      o.open(_path, std::ios::trunc);
+      o.open(path_, std::ios::trunc);
     }
 
     if (!o.is_open()) {
-      throw std::runtime_error("[write_route] Cannot open file: " + _path + ".");
+      throw std::runtime_error("[write_route] Cannot open file: " + path_ + ".");
     }
 
     o << "---\n" << value << "\n";
@@ -61,13 +64,13 @@ public:
   {
     std::ofstream o;
     if (append) {
-      o.open(_path, std::ios::app);
+      o.open(path_, std::ios::app);
     } else {
-      o.open(_path, std::ios::trunc);
+      o.open(path_, std::ios::trunc);
     }
 
     if (!o.is_open()) {
-      throw std::runtime_error("[write_route] Cannot open file: " + _path + ".");
+      throw std::runtime_error("[write_route] Cannot open file: " + path_ + ".");
     }
     for (auto & value : values) {
       o << "---\n" << value << "\n";
@@ -75,10 +78,7 @@ public:
     o.close();
   }
 
-private:
-  auto expand_home_path(const std::string &) -> std::string;
-
-  std::string _path;
+  std::string path_;
 };
 }  // namespace autoware::route_history
 
