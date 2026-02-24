@@ -82,6 +82,7 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
   // });
   // add_to_group("11dcba2a-37e3-447d-aa62-24b846c27b45", "uuid added!");
   // remove_from_group("11dcba2a-37e3-447d-aa62-24b846c27b45", {"uuid 2"});
+  set_group_name("11dcba2a-37e3-447d-aa62-24b846c27b45", "I am a changed name!");
 }
 
 NodeLogic::~NodeLogic()
@@ -403,6 +404,44 @@ void NodeLogic::remove_from_group(
       }
 
       (*p)["route_uuids"] = new_route_uuids_node;
+      p = docs.end();
+    } else {
+      ++p;
+    }
+  }
+
+  yaml_storage_groups_->clear();
+  yaml_storage_groups_->write(docs, true);
+}
+
+// TODO(lewisjsmith): Refactor to pass a YamlStorage through and join with route name
+void NodeLogic::set_group_name(const std::string & group_uuid, const std::string & group_name)
+{
+  if (group_uuid.size() == 0 || group_name.size() == 0) {
+    RCLCPP_INFO(node_->get_logger(), "[set_group_name] Invalid empty uuid or name given.");
+    return;
+  }
+
+  // Read and save to function scope
+  std::vector<YAML::Node> docs;
+  {
+    std::lock_guard<std::mutex> lock(mtx_);
+    docs = yaml_storage_groups_->read();
+  }
+
+  // Delete from function scope
+  // clang-format off
+    for (auto p = docs.begin(); p != docs.end(); ) {
+    // clang-format on
+    if (!*p || !(*p)["group_uuid"]) {
+      ++p;
+      continue;
+    }
+    if ((*p)["group_uuid"].as<std::string>() == group_uuid) {
+      (*p)["name"] = group_name;
+      RCLCPP_INFO(
+        node_->get_logger(), "[set_group_name] Name changed to \"%s\" for group with uuid: %s.",
+        group_name.c_str(), group_uuid.c_str());
       p = docs.end();
     } else {
       ++p;
