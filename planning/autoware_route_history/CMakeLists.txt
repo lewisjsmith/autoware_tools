@@ -25,7 +25,13 @@ qt5_wrap_cpp(MOC_FILES
   include/route_history/rviz_panel.hpp
 )
 
-add_library(autoware_route_history SHARED src/rviz_panel.cpp ${MOC_FILES})
+add_library(autoware_route_history SHARED
+src/rviz_panel.cpp
+src/node_logic.cpp
+src/yaml_storage.cpp
+${MOC_FILES}
+)
+
 target_include_directories(autoware_route_history PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>

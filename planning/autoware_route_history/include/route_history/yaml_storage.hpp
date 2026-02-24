@@ -15,7 +15,6 @@
 #ifndef ROUTE_HISTORY__YAML_STORAGE_HPP_
 #define ROUTE_HISTORY__YAML_STORAGE_HPP_
 
-#include <yaml-cpp/node/parse.h>
 #include <yaml-cpp/yaml.h>
 
 #include <fstream>
@@ -32,27 +31,14 @@ public:
   YamlStorage() {}
   ~YamlStorage() {}
 
-  void set_path(const std::string & path) { _path = expand_home_path(path); }
-  std::string get_path() { return _path; }
+  void set_path(const std::string &);
+  std::string get_path();
 
-  std::vector<YAML::Node> read()
-  {
-    try {
-      return YAML::LoadAllFromFile(_path);
-    } catch (const YAML::BadFile &) {
-      return {};
-    }
-  }
+  std::vector<YAML::Node> read();
 
-  void clear()
-  {
-    std::ofstream o;
-    o.open(_path, std::ios::trunc);
-  }
+  void clear();
 
-  // clang-format off
-  template<typename T>
-  // clang-format on
+  template <typename T>
   void write(T & value, bool append = true)
   {
     std::ofstream o;
@@ -70,9 +56,7 @@ public:
     o.close();
   }
 
-  // clang-format off
-  template<typename T>
-  // clang-format on
+  template <typename T>
   void write(std::vector<T> & values, bool append = true)
   {
     std::ofstream o;
@@ -80,11 +64,6 @@ public:
       o.open(_path, std::ios::app);
     } else {
       o.open(_path, std::ios::trunc);
-    }
-
-    if (!o.is_open()) {
-      // RCLCPP_ERROR(node_->get_logger(), "[write_route] Cannot open file: %s.", filepath.c_str());
-      throw std::runtime_error("[write_route] Cannot open file: " + _path + ".");
     }
 
     if (!o.is_open()) {
@@ -97,16 +76,7 @@ public:
   }
 
 private:
-  auto expand_home_path(const std::string & path) -> std::string
-  {
-    if (!path.empty() && path[0] == '~') {
-      const char * home = getenv("HOME");
-      if (home) {
-        return std::string(home) + path.substr(1);
-      }
-    }
-    return path;
-  }
+  auto expand_home_path(const std::string &) -> std::string;
 
   std::string _path;
 };
