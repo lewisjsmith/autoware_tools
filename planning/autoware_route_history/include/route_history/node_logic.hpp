@@ -24,6 +24,8 @@
 #include <rclcpp/parameter.hpp>
 
 #include "autoware_adapi_v1_msgs/msg/route.hpp"
+#include "autoware_adapi_v1_msgs/msg/route_state.hpp"
+#include "autoware_adapi_v1_msgs/srv/change_operation_mode.hpp"
 #include "autoware_adapi_v1_msgs/srv/clear_route.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
@@ -67,6 +69,17 @@ public:
 
   void save_route();
 
+  // feat-groups-play
+  // load -> start -> reset -> load... (optional pause)
+  void start_route();
+  void pause_route();
+  void reset_route();
+
+  void run_group();
+  void pause_group();
+  void reset_group();
+
+  // Groups
   void create_group(
     const std::string & group_name = "New group",
     const std::vector<std::string> & route_uuids = {});
@@ -80,12 +93,20 @@ public:
   void delete_groups(const std::vector<std::string> & group_uuids);
   // TODO(lewisjsmith): add mutex for group file mutation
 
+  // feat-groups-play
+  rclcpp::Subscription<autoware_adapi_v1_msgs::msg::RouteState>::SharedPtr
+    route_state_subscription_;
+  rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedPtr start_route_client_;
+  rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedPtr stop_route_client_;
+  void route_state_callback(const autoware_adapi_v1_msgs::msg::RouteState &);
+  autoware_adapi_v1_msgs::msg::RouteState current_route_state;
+  //
+
   rclcpp::Subscription<autoware_adapi_v1_msgs::msg::Route>::SharedPtr route_set_subscription_;
 
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
     initial_pose_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pose_publisher_;
-  rclcpp::Publisher<std_msgs::msg::String>::SharedPtr sync_notif_publisher_;
 
   uuid_route_map routes;
   adapi_route current_route;

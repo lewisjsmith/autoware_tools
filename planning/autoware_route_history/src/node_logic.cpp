@@ -67,7 +67,6 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
     node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("/initialpose", 10);
   goal_pose_publisher_ =
     node_->create_publisher<geometry_msgs::msg::PoseStamped>("/planning/mission_planning/goal", 10);
-  sync_notif_publisher_ = node_->create_publisher<std_msgs::msg::String>("update", 10);
 
   yaml_storage_routes_ = std::make_unique<YamlStorage>();
   yaml_storage_routes_->set_path(get_save_file_path_param());
@@ -75,6 +74,16 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
 
   yaml_storage_groups_ = std::make_unique<YamlStorage>();
   yaml_storage_groups_->set_path("~/.ros/route_history_groups.yaml");
+
+  // feat-groups-play
+  route_state_subscription_ = node_->create_subscription<autoware_adapi_v1_msgs::msg::RouteState>(
+    "/api/routing/state", 10,
+    [this](const autoware_adapi_v1_msgs::msg::RouteState & msg) { route_state_callback(msg); });
+
+  start_route_client_ = node_->create_client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>(
+    "/api/operation_mode/change_to_autonomous");
+  stop_route_client_ = node_->create_client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>(
+    "/api/operation_mode/change_to_stop");
 }
 
 NodeLogic::~NodeLogic()
@@ -82,7 +91,6 @@ NodeLogic::~NodeLogic()
   route_set_subscription_.reset();
   initial_pose_publisher_.reset();
   goal_pose_publisher_.reset();
-  sync_notif_publisher_.reset();
 
   RCLCPP_INFO(node_->get_logger(), "[~NodeLogic()] NodeLogic clean up successful.");
 }
@@ -448,6 +456,56 @@ void NodeLogic::delete_groups(const std::vector<std::string> & group_uuids)
 
   yaml_storage_groups_->clear();
   yaml_storage_groups_->write(new_docs, true);
+}
+
+void NodeLogic::route_state_callback(const autoware_adapi_v1_msgs::msg::RouteState & msg)
+{
+  current_route_state = msg;
+}
+
+void NodeLogic::start_route()
+{
+  // check not already moving
+  // check for valid route
+  // set to automatic driving - change mode
+
+  // callback to stop at the end of the route - change mode
+
+  // localization/state error on some replayed tracks
+
+  // move check to controler
+  // 1 unset -> 2 set -> 3 arrived
+  // if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
+  // }
+  auto request = std::make_shared<autoware_adapi_v1_msgs::srv::ChangeOperationMode::Request>();
+  auto future = start_route_client_->async_send_request(
+    request,
+    [this](rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedFuture future) {
+      if (future.valid()) {
+        RCLCPP_INFO(node_->get_logger(), "Operation mode changed to 'auto'.");
+      } else {
+        RCLCPP_INFO(node_->get_logger(), "Operation mode change to 'auto' failed.");
+      }
+    });
+}
+
+void NodeLogic::pause_route()
+{
+  auto request = std::make_shared<autoware_adapi_v1_msgs::srv::ChangeOperationMode::Request>();
+  auto future = stop_route_client_->async_send_request(
+    request,
+    [this](rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedFuture future) {
+      if (future.valid()) {
+        RCLCPP_INFO(node_->get_logger(), "Operation mode changed to 'auto'.");
+      } else {
+        RCLCPP_INFO(node_->get_logger(), "Operation mode change to 'auto' failed.");
+      }
+    });
+}
+
+void NodeLogic::reset_route()
+{
+  // clear route
 }
 
 }  // namespace autoware::route_history
