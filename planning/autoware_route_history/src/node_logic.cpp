@@ -30,6 +30,8 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "std_msgs/msg/string.hpp"
+#include <autoware_adapi_v1_msgs/msg/detail/route_state__struct.hpp>
+#include <autoware_adapi_v1_msgs/srv/detail/clear_route__struct.hpp>
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -38,6 +40,7 @@
 #include <yaml-cpp/node/node.h>
 #include <yaml-cpp/yaml.h>
 
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <fstream>
@@ -48,6 +51,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <future>
+#include <queue>
 
 namespace autoware::route_history
 {
@@ -84,6 +90,12 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
     "/api/operation_mode/change_to_autonomous");
   stop_route_client_ = node_->create_client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>(
     "/api/operation_mode/change_to_stop");
+  clear_route_client_ =
+    node_->create_client<autoware_adapi_v1_msgs::srv::ClearRoute>("/api/routing/clear_route");
+
+
+  // Testing new code from here
+  run_group();
 }
 
 NodeLogic::~NodeLogic()
@@ -146,6 +158,13 @@ void NodeLogic::load_route(const std::string & uuid)
     RCLCPP_INFO(node_->get_logger(), "[set_route] No uuid given.");
     return;
   }
+
+  if (routes.count(uuid) == 0) {
+    RCLCPP_INFO(node_->get_logger(), "[set_route] No route found for uuid: %s.", 
+    uuid.c_str());
+    return;
+  }
+
   geometry_msgs::msg::PoseWithCovarianceStamped initial_msg;
 
   initial_msg.header.frame_id = routes.at(uuid).route.header.frame_id;
@@ -465,18 +484,6 @@ void NodeLogic::route_state_callback(const autoware_adapi_v1_msgs::msg::RouteSta
 
 void NodeLogic::start_route()
 {
-  // check not already moving
-  // check for valid route
-  // set to automatic driving - change mode
-
-  // callback to stop at the end of the route - change mode
-
-  // localization/state error on some replayed tracks
-
-  // move check to controler
-  // 1 unset -> 2 set -> 3 arrived
-  // if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
-  // }
   auto request = std::make_shared<autoware_adapi_v1_msgs::srv::ChangeOperationMode::Request>();
   auto future = start_route_client_->async_send_request(
     request,
@@ -496,16 +503,153 @@ void NodeLogic::pause_route()
     request,
     [this](rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedFuture future) {
       if (future.valid()) {
-        RCLCPP_INFO(node_->get_logger(), "Operation mode changed to 'auto'.");
+        RCLCPP_INFO(node_->get_logger(), "Operation mode changed to 'stop'.");
       } else {
-        RCLCPP_INFO(node_->get_logger(), "Operation mode change to 'auto' failed.");
+        RCLCPP_INFO(node_->get_logger(), "Operation mode change to 'stop' failed.");
       }
     });
 }
 
-void NodeLogic::reset_route()
+void NodeLogic::clear_route()
 {
-  // clear route
+  auto request = std::make_shared<autoware_adapi_v1_msgs::srv::ClearRoute::Request>();
+  auto future = clear_route_client_->async_send_request(
+    request, [this](rclcpp::Client<autoware_adapi_v1_msgs::srv::ClearRoute>::SharedFuture future) {
+      if (future.valid()) {
+        RCLCPP_INFO(node_->get_logger(), "Clear route successfully called.");
+      } else {
+        RCLCPP_INFO(node_->get_logger(), "Call to Clear route failed.");
+      }
+    });
 }
+
+// void NodeLogic::play_route(const std::string& uuid)
+// {
+//   // clear_route();
+//   load_route(uuid);
+//   // start_route();
+// }
+
+// check not already moving
+// check for valid route
+// set to automatic driving - change mode
+// callback to stop at the end of the route - change mode
+
+// localization/state error on some replayed tracks
+
+// move check to controler
+// 1 unset -> 2 set -> 3 arrived
+// if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
+// }
+// Route state:  Unknown, Unset, Set, Arrived, Changing
+// current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED
+
+void NodeLogic::run_group() {
+
+  action a;
+  a.type = action_option::LOAD;
+  a.start = std::bind(&NodeLogic::load_route, this, "05ccc870-eee9-4f89-89b0-e8068ec47e98");
+  actions_.push(a);
+
+  action b;
+  b.type = action_option::PLAY;
+  b.start = std::bind(&NodeLogic::start_route, this);
+  actions_.push(b);
+
+  action c;
+  c.type = action_option::LOAD;
+  c.start = std::bind(&NodeLogic::load_route, this, "8fdee31f-43c7-4d70-b7e8-e83fcb87fb3c");
+  actions_.push(c);
+
+  worker_ = std::async(
+    std::launch::async,
+    [this](){
+
+      while(!actions_.empty()) {
+
+        auto action = actions_.front();
+        actions_.pop();
+
+        std::promise<void> completion;
+        auto future = completion.get_future();
+
+        if(action.type == action_option::LOAD) {
+          action.start();
+
+          std::future<void> listener = std::async(std::launch::async, [this](){
+            int counter = 0;
+            while(counter < 6) {
+              if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
+                RCLCPP_INFO(node_->get_logger(), "Success.");
+                return;
+              }
+              std::this_thread::sleep_for(std::chrono::seconds(5));
+              counter++;
+            }
+            RCLCPP_INFO(node_->get_logger(), "Fail.");
+            return;
+          });
+
+          listener.wait();
+        }
+        
+        if(action.type == action_option::PLAY) {
+          action.start();
+
+          std::future<void> listener = std::async(std::launch::async, [this](){
+            int counter = 0;
+            while(counter < 6) {
+              if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED) {
+                RCLCPP_INFO(node_->get_logger(), "Success.");
+                return;
+              }
+              std::this_thread::sleep_for(std::chrono::seconds(5));
+              counter++;
+            }
+            RCLCPP_INFO(node_->get_logger(), "Fail.");
+            return;
+          });
+
+          listener.wait();
+        }
+
+        future.wait();
+      }
+
+    });
+}
+
+
+
+// void NodeLogic::in_progress_checker(){
+//   int counter = 0;
+//   while(counter < 6){
+//     if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED){
+//       RCLCPP_INFO(node_->get_logger(), "Route finished successfully.");
+//       return;
+//     } 
+//     std::this_thread::sleep_for(std::chrono::seconds(10));
+//     counter++;
+//   }
+//   RCLCPP_INFO(node_->get_logger(), "Route did not finish.");
+//   return;
+// }
+
+// void NodeLogic::run_group()
+// {
+//   // Future
+//   // future.get() to block
+
+// // {current_route_state, node_}
+
+//   // for(int i = 0; i < 3; i++) {
+//   checker_ = std::async(std::launch::async, &NodeLogic::in_progress_checker, this);
+//   //   // play_route("uuid");
+//   //   play_route("05ccc870-eee9-4f89-89b0-e8068ec47e98");
+//   // }
+
+//   // Testing
+//   // play_route("05ccc870-eee9-4f89-89b0-e8068ec47e98");
+// }
 
 }  // namespace autoware::route_history

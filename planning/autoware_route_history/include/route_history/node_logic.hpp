@@ -31,10 +31,13 @@
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "std_msgs/msg/string.hpp"
 
+#include <future>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include <queue>
 
 namespace autoware::route_history
 {
@@ -73,8 +76,10 @@ public:
   // load -> start -> reset -> load... (optional pause)
   void start_route();
   void pause_route();
-  void reset_route();
+  void clear_route();
+  void play_route(const std::string&);
 
+  void in_progress_checker();
   void run_group();
   void pause_group();
   void reset_group();
@@ -98,6 +103,7 @@ public:
     route_state_subscription_;
   rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedPtr start_route_client_;
   rclcpp::Client<autoware_adapi_v1_msgs::srv::ChangeOperationMode>::SharedPtr stop_route_client_;
+  rclcpp::Client<autoware_adapi_v1_msgs::srv::ClearRoute>::SharedPtr clear_route_client_;
   void route_state_callback(const autoware_adapi_v1_msgs::msg::RouteState &);
   autoware_adapi_v1_msgs::msg::RouteState current_route_state;
   //
@@ -116,6 +122,21 @@ private:
   std::unique_ptr<YamlStorage> yaml_storage_routes_ = nullptr;
   std::unique_ptr<YamlStorage> yaml_storage_groups_ = nullptr;
   std::mutex mtx_;
+
+  enum class action_option {
+    LOAD,
+    PLAY,
+    CLEAR
+  };
+
+  std::future<void> worker_;
+  typedef struct {
+    action_option type;
+    std::function<void()> start;
+  } action;
+
+  std::queue<action> actions_;
+
 };
 
 }  // namespace autoware::route_history
