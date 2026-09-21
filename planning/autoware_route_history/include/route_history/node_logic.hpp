@@ -33,11 +33,10 @@
 
 #include <future>
 #include <memory>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <queue>
 
 namespace autoware::route_history
 {
@@ -77,7 +76,7 @@ public:
   void start_route();
   void pause_route();
   void clear_route();
-  void play_route(const std::string&);
+  void play_route(const std::string &);
 
   void in_progress_checker();
   void run_group();
@@ -123,20 +122,16 @@ private:
   std::unique_ptr<YamlStorage> yaml_storage_groups_ = nullptr;
   std::mutex mtx_;
 
-  enum class action_option {
-    LOAD,
-    PLAY,
-    CLEAR
-  };
+  enum class action_option { LOAD, PLAY, CLEAR };
 
   std::future<void> worker_;
-  typedef struct {
+  typedef struct
+  {
     action_option type;
     std::function<void()> start;
   } action;
 
   std::queue<action> actions_;
-
 };
 
 }  // namespace autoware::route_history

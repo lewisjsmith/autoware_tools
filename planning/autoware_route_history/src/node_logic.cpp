@@ -45,15 +45,14 @@
 #include <exception>
 #include <fstream>
 #include <functional>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <future>
-#include <queue>
 
 namespace autoware::route_history
 {
@@ -92,7 +91,6 @@ NodeLogic::NodeLogic(const rclcpp::Node::SharedPtr & node) : node_(node)
     "/api/operation_mode/change_to_stop");
   clear_route_client_ =
     node_->create_client<autoware_adapi_v1_msgs::srv::ClearRoute>("/api/routing/clear_route");
-
 
   // Testing new code from here
   run_group();
@@ -160,8 +158,7 @@ void NodeLogic::load_route(const std::string & uuid)
   }
 
   if (routes.count(uuid) == 0) {
-    RCLCPP_INFO(node_->get_logger(), "[set_route] No route found for uuid: %s.", 
-    uuid.c_str());
+    RCLCPP_INFO(node_->get_logger(), "[set_route] No route found for uuid: %s.", uuid.c_str());
     return;
   }
 
@@ -544,8 +541,8 @@ void NodeLogic::clear_route()
 // Route state:  Unknown, Unset, Set, Arrived, Changing
 // current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED
 
-void NodeLogic::run_group() {
-
+void NodeLogic::run_group()
+{
   action a;
   a.type = action_option::LOAD;
   a.start = std::bind(&NodeLogic::load_route, this, "05ccc870-eee9-4f89-89b0-e8068ec47e98");
@@ -561,65 +558,58 @@ void NodeLogic::run_group() {
   c.start = std::bind(&NodeLogic::load_route, this, "8fdee31f-43c7-4d70-b7e8-e83fcb87fb3c");
   actions_.push(c);
 
-  worker_ = std::async(
-    std::launch::async,
-    [this](){
+  worker_ = std::async(std::launch::async, [this]() {
+    while (!actions_.empty()) {
+      auto action = actions_.front();
+      actions_.pop();
 
-      while(!actions_.empty()) {
+      std::promise<void> completion;
+      auto future = completion.get_future();
 
-        auto action = actions_.front();
-        actions_.pop();
+      if (action.type == action_option::LOAD) {
+        action.start();
 
-        std::promise<void> completion;
-        auto future = completion.get_future();
-
-        if(action.type == action_option::LOAD) {
-          action.start();
-
-          std::future<void> listener = std::async(std::launch::async, [this](){
-            int counter = 0;
-            while(counter < 6) {
-              if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
-                RCLCPP_INFO(node_->get_logger(), "Success.");
-                return;
-              }
-              std::this_thread::sleep_for(std::chrono::seconds(5));
-              counter++;
+        std::future<void> listener = std::async(std::launch::async, [this]() {
+          int counter = 0;
+          while (counter < 6) {
+            if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::SET) {
+              RCLCPP_INFO(node_->get_logger(), "Success.");
+              return;
             }
-            RCLCPP_INFO(node_->get_logger(), "Fail.");
-            return;
-          });
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            counter++;
+          }
+          RCLCPP_INFO(node_->get_logger(), "Fail.");
+          return;
+        });
 
-          listener.wait();
-        }
-        
-        if(action.type == action_option::PLAY) {
-          action.start();
-
-          std::future<void> listener = std::async(std::launch::async, [this](){
-            int counter = 0;
-            while(counter < 6) {
-              if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED) {
-                RCLCPP_INFO(node_->get_logger(), "Success.");
-                return;
-              }
-              std::this_thread::sleep_for(std::chrono::seconds(5));
-              counter++;
-            }
-            RCLCPP_INFO(node_->get_logger(), "Fail.");
-            return;
-          });
-
-          listener.wait();
-        }
-
-        future.wait();
+        listener.wait();
       }
 
-    });
+      if (action.type == action_option::PLAY) {
+        action.start();
+
+        std::future<void> listener = std::async(std::launch::async, [this]() {
+          int counter = 0;
+          while (counter < 6) {
+            if (current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED) {
+              RCLCPP_INFO(node_->get_logger(), "Success.");
+              return;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            counter++;
+          }
+          RCLCPP_INFO(node_->get_logger(), "Fail.");
+          return;
+        });
+
+        listener.wait();
+      }
+
+      future.wait();
+    }
+  });
 }
-
-
 
 // void NodeLogic::in_progress_checker(){
 //   int counter = 0;
@@ -627,7 +617,7 @@ void NodeLogic::run_group() {
 //     if(current_route_state.state == autoware_adapi_v1_msgs::msg::RouteState::ARRIVED){
 //       RCLCPP_INFO(node_->get_logger(), "Route finished successfully.");
 //       return;
-//     } 
+//     }
 //     std::this_thread::sleep_for(std::chrono::seconds(10));
 //     counter++;
 //   }
